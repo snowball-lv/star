@@ -11,6 +11,11 @@ typedef struct {
 } ObjString;
 
 typedef struct {
+    Obj hdr;
+    Tab *fields;
+} ObjTab;
+
+typedef struct {
     char type;
     union {
         double num;
@@ -57,6 +62,7 @@ int emitprint(Chunk *c);
 int emitpop(Chunk *c);
 int emitgetlocal(Chunk *c, int slot);
 int emitsetlocal(Chunk *c, int slot);
+int emitgetfield(Chunk *c, int consid);
 int emitcjmp(Chunk *c);
 int emitjmp(Chunk *c);
 int emitjmp2(Chunk *c, int ip);

@@ -193,13 +193,22 @@ static void callexpr(Parser *p) {
         expect(p, T_RPAREN);
 }
 
+static void dotexpr(Parser *p) {
+    callexpr(p);
+    while (match(p, T_DOT)) {
+        expect(p, T_ID);
+        int name = addcons(p->c, strval(p->prev.str));
+        emitgetfield(p->c, name);
+    }
+}
+
 static void unary(Parser *p) {
     if (match(p, T_SUB)) {
         unary(p);
         emitneg(p->c);
     }
     else {
-        callexpr(p);
+        dotexpr(p);
     }
 }
 

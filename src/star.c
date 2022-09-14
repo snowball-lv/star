@@ -12,6 +12,7 @@
         OP(PRINT) \
         OP(POP) \
         OP(GET_LOCAL) OP(SET_LOCAL) \
+        OP(GET_FIELD) OP(SET_FIELD) \
         OP(CJMP) OP(JMP) \
         OP(NOP) \
         OP(NOT) \
@@ -19,7 +20,7 @@
 
 #define VALS(V) V(NONE) V(NUM) V(BOOL) V(NIL) V(OBJ)
 
-#define OBJS(O) O(NONE) O(STR)
+#define OBJS(O) O(NONE) O(STR) O(TAB)
 
 enum {
 #define OP(name) OP_ ## name,
@@ -78,6 +79,13 @@ void freechunk(Chunk *c) {
     }
     freearray(c->cons);
     xfree(c);
+}
+
+static ObjTab *alloctab() {
+    ObjTab *o = allocobj(sizeof(ObjTab));
+    o->hdr.type = OBJ_TAB;
+    o->fields = newtab();
+    return o;
 }
 
 static ObjString *allocstr(char *str) {
@@ -163,6 +171,14 @@ int emitsetlocal(Chunk *c, int slot) {
     return emit(c, (Ins){OP_SET_LOCAL, slot});
 }
 
+int emitgetfield(Chunk *c, int consid) {
+    return emit(c, (Ins){OP_GET_FIELD, consid});
+}
+
+int emitsetfield(Chunk *c, int consid) {
+    return emit(c, (Ins){OP_SET_FIELD, consid});
+}
+
 int emitcjmp(Chunk *c) {
     return emit(c, (Ins){OP_CJMP});
 }
@@ -226,6 +242,10 @@ void fixassign(Chunk *c, int ip) {
         c->ins[ip].op = OP_NOP;
         emitsetlocal(c, i.arg);
         return;
+    case OP_GET_FIELD:
+        c->ins[ip].op = OP_NOP;
+        emitsetfield(c, i.arg);
+        return;
     }
     printf("*** left-hand side not an lvalue\n");
     exit(1);
@@ -273,25 +293,12 @@ void printchunk(Chunk *c) {
             printf("%s", opname(i.op));
             break;
         case OP_CONS:
-        case OP_GET_LOCAL:
-        case OP_SET_LOCAL:
+        case OP_GET_LOCAL: case OP_SET_LOCAL:
+        case OP_GET_FIELD: case OP_SET_FIELD:
         case OP_CJMP:
         case OP_JMP:
             printf("%s %i", opname(i.op), i.arg);
             break;
-        default: printf("???"); break;
-        }
-        printf("\n");
-    }
-}
-
-void printstack(Vm *vm) {
-    printf("--- Stack ---\n");
-    for (int i = 0; i < vm->nstack; i++) {
-        Value v = vm->stack[i];
-        printf("%3i: %s ", i, valname(v.type));
-        switch (v.type) {
-        case V_NUM: printf("%f", v.as.num); break;
         default: printf("???"); break;
         }
         printf("\n");
@@ -332,10 +339,21 @@ static void printval(Value v) {
     case V_OBJ: {
         switch (v.as.obj->type) {
         case OBJ_STR: printf("\"%s\"", ((ObjString *)v.as.obj)->str); return;
+        case OBJ_TAB: printf("{Object Table}"); return;
         }
     }
     }
     printf("???");
+}
+
+void printstack(Vm *vm) {
+    printf("--- Stack ---\n");
+    for (int i = 0; i < vm->nstack; i++) {
+        Value v = vm->stack[i];
+        printf("%3i: %s ", i, valname(v.type));
+        printval(v);
+        printf("\n");
+    }
 }
 
 static void binop(Vm *vm, Value l, Value r, int op) {
@@ -374,6 +392,23 @@ static void binop(Vm *vm, Value l, Value r, int op) {
     exit(1);
 }
 
+static void pushfield(Vm *vm, Value vtab, Value vname) {
+    if (vtab.type != V_OBJ || vtab.as.obj->type != OBJ_TAB) {
+        printf("*** only tables have fields\n");
+        exit(1);
+    }
+    if (vname.type != V_OBJ || vname.as.obj->type != OBJ_STR) {
+        printf("*** field name has to be a string\n");
+        exit(1);
+    }
+    ObjTab *tab = (ObjTab *)vtab.as.obj;
+    ObjString *name = (ObjString *)vname.as.obj;
+    if (tabhas(tab->fields, name->str))
+        push(vm, numval(tabget(tab->fields, name->str)));
+    else
+        push(vm, nilval());
+}
+
 void runchunk(Vm *vm, Chunk *c) {
     for (int ip = 0; ip < c->nins; ip++) {
         Ins i = c->ins[ip];
@@ -382,11 +417,30 @@ void runchunk(Vm *vm, Chunk *c) {
         case OP_RET: return;
         case OP_CONS: push(vm, c->cons[i.arg]); break;
         case OP_NIL: push(vm, nilval()); break;
+        case OP_NEW: {
+            Value v = (Value){V_OBJ, {.obj = (Obj *)alloctab()}};
+            push(vm, v);
+            break;
+        }
         case OP_POP: pop(vm); break;
         case OP_GET_LOCAL: push(vm, vm->stack[i.arg]); break;
         case OP_SET_LOCAL: {
             Value v = pop(vm);
             vm->stack[i.arg] = v;
+            push(vm, v);
+            break;
+        }
+        case OP_GET_FIELD: {
+            pushfield(vm, pop(vm), c->cons[i.arg]);
+            break;
+        }
+        case OP_SET_FIELD:  {
+            Value v = pop(vm);
+            Value vtab = pop(vm);
+            Value vname = c->cons[i.arg];
+            ObjTab *tab = (ObjTab *)vtab.as.obj;
+            ObjString *name = (ObjString *)vname.as.obj;
+            tabset(tab->fields, name->str, v.as.num);
             push(vm, v);
             break;
         }
@@ -423,25 +477,10 @@ void runchunk(Vm *vm, Chunk *c) {
             binop(vm, l, r, i.op);
             break;
         }
-        case OP_PRINT: {
-            Value v = pop(vm);
-            switch (v.type) {
-            case V_NUM: printf("%f", v.as.num); break;
-            case V_BOOL: printf(v.as.boolean ? "true" : "false"); break;
-            case V_NIL: printf("nil"); break;
-            case V_OBJ:
-                switch (v.as.obj->type) {
-                case OBJ_STR:
-                    printf("\"%s\"", ((ObjString *)v.as.obj)->str);
-                    break;
-                default: printf("Object ???"); break;
-                }
-                break;
-            default: printf("???"); break;
-            }
+        case OP_PRINT: 
+            printval(pop(vm));
             printf("\n");
             break;
-        }
         default:
             printf("*** can't execute %s\n", opname(i.op));
             exit(1);
