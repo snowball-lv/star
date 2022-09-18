@@ -18,20 +18,12 @@
         OP(NOT) \
         OP(LT)
 
-#define VALS(V) V(NONE) V(NUM) V(BOOL) V(NIL) V(OBJ)
-
 #define OBJS(O) O(NONE) O(STR) O(TAB)
 
 enum {
 #define OP(name) OP_ ## name,
     OPS(OP)
 #undef OP
-};
-
-enum {
-#define V(name) V_ ## name,
-    VALS(V)
-#undef V
 };
 
 enum {
@@ -84,7 +76,7 @@ void freechunk(Chunk *c) {
 static ObjTab *alloctab() {
     ObjTab *o = allocobj(sizeof(ObjTab));
     o->hdr.type = OBJ_TAB;
-    o->fields = newtab();
+    o->fields = newvaltab();
     return o;
 }
 
@@ -94,6 +86,7 @@ static ObjString *allocstr(char *str) {
     o->len = strlen(str);
     o->str = xmalloc(o->len + 1);
     strcpy(o->str, str);
+    o->hash = strhash(str);
     return o;
 }
 
@@ -101,11 +94,11 @@ Value numval(double num) {
     return (Value){V_NUM, {.num = num}};
 }
 
-static Value boolval(char boolean) {
+Value boolval(char boolean) {
     return (Value){V_BOOL, {.boolean = !!boolean}};
 }
 
-static Value nilval() {
+Value nilval() {
     return (Value){V_NIL};
 }
 
@@ -403,8 +396,9 @@ static void pushfield(Vm *vm, Value vtab, Value vname) {
     }
     ObjTab *tab = (ObjTab *)vtab.as.obj;
     ObjString *name = (ObjString *)vname.as.obj;
-    if (tabhas(tab->fields, name->str))
-        push(vm, numval(tabget(tab->fields, name->str)));
+    Value tmp;
+    if (valtabget(tab->fields, name, &tmp))
+        push(vm, tmp);
     else
         push(vm, nilval());
 }
@@ -440,7 +434,7 @@ void runchunk(Vm *vm, Chunk *c) {
             Value vname = c->cons[i.arg];
             ObjTab *tab = (ObjTab *)vtab.as.obj;
             ObjString *name = (ObjString *)vname.as.obj;
-            tabset(tab->fields, name->str, v.as.num);
+            valtabset(tab->fields, name, v);
             push(vm, v);
             break;
         }

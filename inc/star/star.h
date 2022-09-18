@@ -1,5 +1,15 @@
 #pragma once
 
+#define VALS(V) V(NONE) V(NUM) V(BOOL) V(NIL) V(OBJ)
+
+enum {
+#define V(name) V_ ## name,
+    VALS(V)
+#undef V
+};
+
+typedef struct ValTab ValTab;
+
 typedef struct  {
     char type;
 } Obj;
@@ -8,11 +18,12 @@ typedef struct {
     Obj hdr;
     char *str;
     int len;
+    unsigned hash;
 } ObjString;
 
 typedef struct {
     Obj hdr;
-    Tab *fields;
+    ValTab *fields;
 } ObjTab;
 
 typedef struct {
@@ -47,6 +58,8 @@ Vm *newvm();
 void freevm(Vm *vm);
 
 Value numval(double num);
+Value boolval(char boolean);
+Value nilval();
 Value strval(char *str);
 int addcons(Chunk *c, Value v);
 int emit(Chunk *c, Ins i);
@@ -74,6 +87,11 @@ int emitnew(Chunk *c);
 void patchjmp(Chunk *c, int ip);
 int getip(Chunk *c);
 void fixassign(Chunk *c, int ip);
+
+ValTab *newvaltab();
+void freevaltab(ValTab *vt);
+int valtabget(ValTab *vt, ObjString *key, Value *dst);
+void valtabset(ValTab *vt, ObjString *key, Value v);
 
 void printchunk(Chunk *c);
 void printstack(Vm *vm);

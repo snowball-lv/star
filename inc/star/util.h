@@ -14,4 +14,4 @@ void tabset(Tab *t, char *key, int val);
 void *tabgetp(Tab *t, char *key);
 void tabsetp(Tab *t, char *key, void *ptr);
 
-int strhash(char *str);
+unsigned strhash(char *str);

@@ -91,7 +91,7 @@ void tabsetp(Tab *t, char *key, void *ptr) {
 }
 
 // https://stackoverflow.com/a/7666577
-int strhash(char *str) {
+unsigned strhash(char *str) {
     int hash = 5381;
     int c;
     while ((c = *str++))
