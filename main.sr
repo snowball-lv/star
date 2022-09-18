@@ -1,0 +1,15 @@
+
+
+function newobj() {
+    var obj = {}
+    obj.msg = "message"
+    return obj
+}
+
+var a = newobj()
+var b = newobj()
+
+a.msg = "new message"
+
+print a.msg
+print b.msg

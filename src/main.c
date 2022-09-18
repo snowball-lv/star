@@ -56,11 +56,11 @@ int main(int argc, char **argv) {
             printf("> ");
             if (!fgets(line, sizeof(line), stdin)) break;
             if (emptyline(line)) continue;
-            Chunk *c = compile(line);
-            printchunk(c);
-            runchunk(vm, c);
+            ObjFunc *fn = compile(line);
+            printchunk(fn->chunk);
+            runchunk(vm, fn->chunk);
             printstack(vm);
-            freechunk(c);
+            freechunk(fn->chunk);
         }
         freevm(vm);
     }
@@ -70,13 +70,13 @@ int main(int argc, char **argv) {
     else {
         printmem();
         char *src = readfile(file);
-        Chunk *c = compile(src);
+        ObjFunc *fn = compile(src);
         xfree(src);
         Vm *vm = newvm();
-        printchunk(c);
-        runchunk(vm, c);
+        printchunk(fn->chunk);
+        runchunk(vm, fn->chunk);
         printstack(vm);
-        freechunk(c);
+        freechunk(fn->chunk);
         freevm(vm);
         printmem();
     }

@@ -48,14 +48,22 @@ typedef struct {
 } Chunk;
 
 typedef struct {
+    Obj hdr;
+    Chunk *chunk;
+} ObjFunc;
+
+typedef struct {
     Value *stack;
     int nstack;
 } Vm;
+
+#define OBJVAL(o) ((Value){.type = V_OBJ, {.obj = (Obj*)(o)}})
 
 Chunk *newchunk();
 void freechunk(Chunk *c);
 Vm *newvm();
 void freevm(Vm *vm);
+ObjFunc *newfunc();
 
 Value numval(double num);
 Value boolval(char boolean);
@@ -83,6 +91,7 @@ int emitnot(Chunk *c);
 int emitlt(Chunk *c);
 int emitnil(Chunk *c);
 int emitnew(Chunk *c);
+int emitcall(Chunk *c);
 
 void patchjmp(Chunk *c, int ip);
 int getip(Chunk *c);
@@ -98,4 +107,4 @@ void printstack(Vm *vm);
 
 void runchunk(Vm *vm, Chunk *c);
 
-Chunk *compile(char *src);
+ObjFunc *compile(char *src);

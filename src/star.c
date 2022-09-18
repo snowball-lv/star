@@ -16,9 +16,10 @@
         OP(CJMP) OP(JMP) \
         OP(NOP) \
         OP(NOT) \
-        OP(LT)
+        OP(LT) \
+        OP(CALL)
 
-#define OBJS(O) O(NONE) O(STR) O(TAB)
+#define OBJS(O) O(NONE) O(STR) O(TAB) O(FUNC)
 
 enum {
 #define OP(name) OP_ ## name,
@@ -87,6 +88,13 @@ static ObjString *allocstr(char *str) {
     o->str = xmalloc(o->len + 1);
     strcpy(o->str, str);
     o->hash = strhash(str);
+    return o;
+}
+
+ObjFunc *newfunc() {
+    ObjFunc *o = allocobj(sizeof(ObjFunc));
+    o->hdr.type = OBJ_FUNC;
+    o->chunk = newchunk();
     return o;
 }
 
@@ -200,6 +208,10 @@ int emitnew(Chunk *c) {
     return emit(c, (Ins){OP_NEW});
 }
 
+int emitcall(Chunk *c) {
+    return emit(c, (Ins){OP_CALL});
+}
+
 void patchjmp(Chunk *c, int ip) {
     c->ins[ip].arg = c->nins - ip;
 }
@@ -244,25 +256,29 @@ void fixassign(Chunk *c, int ip) {
     exit(1);
 }
 
+static void printval(Value v) {
+    switch (v.type) {
+    case V_NIL: printf("nil"); return;
+    case V_BOOL: printf(v.as.boolean ? "true" : "false"); return;
+    case V_NUM: printf("%f", v.as.num); return;
+    case V_OBJ: {
+        switch (v.as.obj->type) {
+        case OBJ_STR: printf("\"%s\"", ((ObjString *)v.as.obj)->str); return;
+        case OBJ_TAB: printf("{Object Table}"); return;
+        case OBJ_FUNC: printf("{Object Function}"); return;
+        }
+    }
+    }
+    printf("???");
+}
+
 void printchunk(Chunk *c) {
     printf("--- Chunk ---\n");
     printf("Constants:\n");
     for (int i = 0; i < c->ncons; i++) {
         Value cons = c->cons[i];
         printf("%3i: ", i);
-        switch (cons.type) {
-        case V_NUM: printf("%f", cons.as.num); break;
-        case V_NIL: printf("nil"); break;
-        case V_OBJ:
-            switch (cons.as.obj->type) {
-            case OBJ_STR:
-                printf("\"%s\"", ((ObjString *)cons.as.obj)->str);
-                break;
-            default: printf("???"); break;
-            }
-            break;
-        default: printf("???"); break;
-        }
+        printval(cons);
         printf("\n");
     }
     printf("Code:\n");
@@ -283,6 +299,7 @@ void printchunk(Chunk *c) {
         case OP_LT:
         case OP_NIL:
         case OP_NEW:
+        case OP_CALL:
             printf("%s", opname(i.op));
             break;
         case OP_CONS:
@@ -322,21 +339,6 @@ static int istrue(Value v) {
 
 static int isvstr(Value v) {
     return v.type == V_OBJ && v.as.obj->type == OBJ_STR;
-}
-
-static void printval(Value v) {
-    switch (v.type) {
-    case V_NIL: printf("nil"); return;
-    case V_BOOL: printf(v.as.boolean ? "true" : "false"); return;
-    case V_NUM: printf("%f", v.as.num); return;
-    case V_OBJ: {
-        switch (v.as.obj->type) {
-        case OBJ_STR: printf("\"%s\"", ((ObjString *)v.as.obj)->str); return;
-        case OBJ_TAB: printf("{Object Table}"); return;
-        }
-    }
-    }
-    printf("???");
 }
 
 void printstack(Vm *vm) {
@@ -403,7 +405,7 @@ static void pushfield(Vm *vm, Value vtab, Value vname) {
         push(vm, nilval());
 }
 
-void runchunk(Vm *vm, Chunk *c) {
+static void runchunkoffset(Vm *vm, Chunk *c, int offset) {
     for (int ip = 0; ip < c->nins; ip++) {
         Ins i = c->ins[ip];
         switch (i.op) {
@@ -417,10 +419,10 @@ void runchunk(Vm *vm, Chunk *c) {
             break;
         }
         case OP_POP: pop(vm); break;
-        case OP_GET_LOCAL: push(vm, vm->stack[i.arg]); break;
+        case OP_GET_LOCAL: push(vm, vm->stack[offset + i.arg]); break;
         case OP_SET_LOCAL: {
             Value v = pop(vm);
-            vm->stack[i.arg] = v;
+            vm->stack[offset + i.arg] = v;
             push(vm, v);
             break;
         }
@@ -475,9 +477,25 @@ void runchunk(Vm *vm, Chunk *c) {
             printval(pop(vm));
             printf("\n");
             break;
+        case OP_CALL: {
+            Value vfn = pop(vm);
+            ObjFunc *fn = (ObjFunc *)vfn.as.obj;
+            if (vfn.type != V_OBJ || fn->hdr.type != OBJ_FUNC) {
+                printf("*** can't call non-function\n");
+                exit(1);
+            }
+            int nstack = vm->nstack;
+            runchunkoffset(vm, fn->chunk, nstack);
+            vm->nstack = nstack + 1;
+            break;
+        }
         default:
             printf("*** can't execute %s\n", opname(i.op));
             exit(1);
         }
     }
+}
+
+void runchunk(Vm *vm, Chunk *c) {
+    runchunkoffset(vm, c, 0);
 }

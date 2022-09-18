@@ -15,6 +15,7 @@
         T(ID) \
         T(VAR) T(PRINT) T(IF) T(ELSE) T(WHILE) T(FUNC) \
         T(LT) \
+        T(RET)
 
 enum {
 #define T(name) T_ ## name,
@@ -29,23 +30,28 @@ typedef struct {
     char *str;
 } Tok;
 
-typedef struct Scope Scope;
-struct Scope {
-    Tab *locals;
+typedef struct {
+    Tok name;
+    int depth;
+} Local;
+
+typedef struct Function Function;
+struct Function {
+    ObjFunc *obj;
+    Local *locals;
     int nlocals;
-    Scope *parent;
+    int depth;
+    Function *parent;
 };
 
 typedef struct {
     char *src;
     Tok prev;
     Tok next;
-    Chunk *c;
     Tab *kws;
-    Scope *scope;
-    int nlocals;
     char **tokstrs;
     int ntokstrs;
+    Function *func;
 } Parser;
 
 static const char *tname(int type) {
@@ -143,32 +149,49 @@ static void expect(Parser *p, int type) {
     exit(1);
 }
 
-static void resolve(Parser *p, Tok id) {
-    for (Scope *s = p->scope; s; s = s->parent) {
-        if (!tabhas(s->locals, id.str)) continue;
-        int slot = tabget(s->locals, id.str);
-        emitgetlocal(p->c, slot);
-        return;
+static Chunk *curchunk(Parser *p) {
+    return p->func->obj->chunk;
+}
+
+static int getlocal(Parser *p, Tok name, int depth) {
+    Function *fn = p->func;
+    for (int i = fn->nlocals - 1; i >= 0; i--) {
+        Local *l = &fn->locals[i];
+        if (l->depth < depth) return -1;
+        if (strcmp(l->name.str, name.str) != 0) continue;
+        return i;
     }
-    printf("*** undeclared identifier %s\n", id.str);
-    exit(1);
+    return -1;
+}
+
+static int haslocal(Parser *p, Tok name) {
+    return getlocal(p, name, p->func->depth) != -1;
+}
+
+static void resolve(Parser *p, Tok name) {
+    int slot = getlocal(p, name, 0);
+    if (slot == -1) {
+        printf("*** undeclared identifier %s\n", name.str);
+        exit(1);
+    }
+    emitgetlocal(curchunk(p), slot);
 }
 
 static void expr(Parser *p);
 
 static void object(Parser *p) {
-    emitnew(p->c);
+    emitnew(curchunk(p));
 }
 
 static void primary(Parser *p) {
     if (match(p, T_STR)) {
-        emitcons(p->c, addcons(p->c, strval(p->prev.str)));
+        emitcons(curchunk(p), addcons(curchunk(p), strval(p->prev.str)));
     }
     else if (match(p, T_NIL)) {
-        emitnil(p->c);
+        emitnil(curchunk(p));
     }
     else if (match(p, T_NUM)) {
-        emitcons(p->c, addcons(p->c, numval(atof(p->prev.str))));
+        emitcons(curchunk(p), addcons(curchunk(p), numval(atof(p->prev.str))));
     }
     else if (match(p, T_ID)) {
         resolve(p, p->prev);
@@ -189,23 +212,25 @@ static void primary(Parser *p) {
 
 static void callexpr(Parser *p) {
     primary(p);
-    if (match(p, T_LPAREN))
+    if (match(p, T_LPAREN)) {
         expect(p, T_RPAREN);
+        emitcall(curchunk(p));
+    }
 }
 
 static void dotexpr(Parser *p) {
     callexpr(p);
     while (match(p, T_DOT)) {
         expect(p, T_ID);
-        int name = addcons(p->c, strval(p->prev.str));
-        emitgetfield(p->c, name);
+        int name = addcons(curchunk(p), strval(p->prev.str));
+        emitgetfield(curchunk(p), name);
     }
 }
 
 static void unary(Parser *p) {
     if (match(p, T_SUB)) {
         unary(p);
-        emitneg(p->c);
+        emitneg(curchunk(p));
     }
     else {
         dotexpr(p);
@@ -221,8 +246,8 @@ static void term(Parser *p) {
     while (match(p, T_MUL) || match(p, T_DIV)) {
         int op = p->prev.type;
         factor(p);
-        if (op == T_MUL) emitmul(p->c);
-        else if (op == T_DIV) emitdiv(p->c);
+        if (op == T_MUL) emitmul(curchunk(p));
+        else if (op == T_DIV) emitdiv(curchunk(p));
     }
 }
 
@@ -231,8 +256,8 @@ static void mathexpr(Parser *p) {
     while (match(p, T_ADD) || match(p, T_SUB)) {
         int op = p->prev.type;
         term(p);
-        if (op == T_ADD) emitadd(p->c);
-        else if (op == T_SUB) emitsub(p->c);
+        if (op == T_ADD) emitadd(curchunk(p));
+        else if (op == T_SUB) emitsub(curchunk(p));
     }
 }
 
@@ -240,16 +265,16 @@ static void relexpr(Parser *p) {
     mathexpr(p);
     while (match(p, T_LT)) {
         mathexpr(p);
-        emitlt(p->c);
+        emitlt(curchunk(p));
     }
 }
 
 static void assignment(Parser *p) {
     relexpr(p);
     if (match(p, T_ASSIGN)) {
-        int getop = getip(p->c) - 1;
+        int getop = getip(curchunk(p)) - 1;
         assignment(p);
-        fixassign(p->c, getop);
+        fixassign(curchunk(p), getop);
     }
 }
 
@@ -257,66 +282,60 @@ static void expr(Parser *p) {
     assignment(p);
 }
 
-static void pushscope(Parser *p) {
-    Scope *s = xmalloc(sizeof(Scope));
-    memset(s, 0, sizeof(Scope));
-    s->locals = newtab();
-    s->parent = p->scope;
-    p->scope = s;
-}
-
-static void popscope(Parser *p) {
-    Scope *s = p->scope;
-    p->scope = p->scope->parent;
-    while (s->nlocals--)
-        emitpop(p->c);
-    freetab(s->locals);
-    xfree(s);
-}
-
 static void stm(Parser *p);
 
 static void block(Parser *p) {
-    pushscope(p);
+    int nlocals = p->func->nlocals;
+    p->func->depth++;
     while (!match(p, T_RBRACE))
         stm(p);
-    popscope(p);
+    p->func->depth--;
+    while (p->func->nlocals > nlocals) {
+        p->func->nlocals--;
+        emitpop(curchunk(p));
+    }
 }
 
 static void definelocal(Parser *p, Tok name) {
-    int slot = p->nlocals++;
-    p->scope->nlocals++;
-    tabset(p->scope->locals, name.str, slot);
+    Function *fn = p->func;
+    int idx = fn->nlocals++;
+    fn->locals = arraygrow(fn->locals, fn->nlocals);
+    fn->locals[idx].name = name;
+    fn->locals[idx].depth = p->func->depth;
 }
 
 static void ifstm(Parser *p) {
     expect(p, T_LPAREN);
     expr(p);
     expect(p, T_RPAREN);
-    emitnot(p->c);
-    int elsejmp = emitcjmp(p->c);
+    emitnot(curchunk(p));
+    int elsejmp = emitcjmp(curchunk(p));
     stm(p);
-    int endjmp = emitjmp(p->c);
-    patchjmp(p->c, elsejmp);
+    int endjmp = emitjmp(curchunk(p));
+    patchjmp(curchunk(p), elsejmp);
     if (match(p, T_ELSE))
         stm(p);
-    patchjmp(p->c, endjmp);
+    patchjmp(curchunk(p), endjmp);
 }
 
 static void whilestm(Parser *p) {
-    int ip = getip(p->c);
+    int ip = getip(curchunk(p));
     expect(p, T_LPAREN);
     expr(p);
     expect(p, T_RPAREN);
-    emitnot(p->c);
-    int endjmp = emitcjmp(p->c);
+    emitnot(curchunk(p));
+    int endjmp = emitcjmp(curchunk(p));
     stm(p);
-    emitjmp2(p->c, ip - getip(p->c));
-    patchjmp(p->c, endjmp);
+    emitjmp2(curchunk(p), ip - getip(curchunk(p)));
+    patchjmp(curchunk(p), endjmp);
 }
 
 static void stm(Parser *p) {
-    if (match(p, T_IF)) {
+    if (match(p, T_RET)) {
+        expr(p);
+        emitret(curchunk(p));
+    }
+    else if (match(p, T_IF)) {
         ifstm(p);
     }
     else if (match(p, T_WHILE)) {
@@ -328,24 +347,24 @@ static void stm(Parser *p) {
     else if (match(p, T_VAR)) {
         expect(p, T_ID);
         Tok name = p->prev;
-        if (tabhas(p->scope->locals, name.str)) {
+        if (haslocal(p, name)) {
             printf("*** variable %s already declared\n", name.str);
             exit(1);
         }
         if (match(p, T_ASSIGN))
             expr(p);
         else
-            emitnil(p->c);
+            emitnil(curchunk(p));
         definelocal(p, name);
     }
     else if (match(p, T_PRINT)) {
         expr(p);
-        emitprint(p->c);
+        emitprint(curchunk(p));
     }
     else if (match(p, T_FUNC)) {
         expect(p, T_ID);
         Tok name = p->prev;
-        if (tabhas(p->scope->locals, name.str)) {
+        if (haslocal(p, name)) {
             printf("*** variable %s already declared\n", name.str);
             exit(1);
         }
@@ -353,21 +372,36 @@ static void stm(Parser *p) {
         expect(p, T_LPAREN);
         expect(p, T_RPAREN);
         expect(p, T_LBRACE);
+        Function child = {0};
+        child.obj = newfunc();
+        child.locals = newarray(sizeof(Local));
+        child.parent = p->func;
+        p->func = &child;
         block(p);
+        emitnil(curchunk(p));
+        emitret(curchunk(p));
+        printchunk(curchunk(p));
+        p->func = p->func->parent;
+        emitcons(curchunk(p), addcons(curchunk(p), OBJVAL(child.obj)));
     }
     else {
         expr(p);
-        emitpop(p->c);
+        emitpop(curchunk(p));
     }
 }
 
-static void parsefile(Parser *p) {
+static ObjFunc *parsefile(Parser *p) {
+    Function main = {0};
+    main.obj = newfunc();
+    main.locals = newarray(sizeof(Local));
+    p->func = &main;
     advance(p);
-    pushscope(p);
     while (!match(p, T_EOF))
         stm(p);
-    popscope(p);
-    emitret(p->c);
+    while (main.nlocals--)
+        emitpop(curchunk(p));
+    emitret(curchunk(p));
+    return main.obj;
 }
 
 static void definekws(Parser *p) {
@@ -378,19 +412,19 @@ static void definekws(Parser *p) {
     tabset(p->kws, "while", T_WHILE);
     tabset(p->kws, "nil", T_NIL);
     tabset(p->kws, "function", T_FUNC);
+    tabset(p->kws, "return", T_RET);
 }
 
-Chunk *compile(char *src) {
+ObjFunc *compile(char *src) {
     Parser p = {0};
     p.src = src;
-    p.c = newchunk();
     p.kws = newtab();
     p.tokstrs = newarray(sizeof(char *));
     definekws(&p);
-    parsefile(&p);
+    ObjFunc *func = parsefile(&p);
     freetab(p.kws);
     for (int i = 0; i < p.ntokstrs; i++)
         xfree(p.tokstrs[i]);
     freearray(p.tokstrs);
-    return p.c;
+    return func;
 }
