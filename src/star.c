@@ -208,8 +208,8 @@ int emitnew(Chunk *c) {
     return emit(c, (Ins){OP_NEW});
 }
 
-int emitcall(Chunk *c) {
-    return emit(c, (Ins){OP_CALL});
+int emitcall(Chunk *c, int nargs) {
+    return emit(c, (Ins){OP_CALL, nargs});
 }
 
 void patchjmp(Chunk *c, int ip) {
@@ -299,9 +299,9 @@ void printchunk(Chunk *c) {
         case OP_LT:
         case OP_NIL:
         case OP_NEW:
-        case OP_CALL:
             printf("%s", opname(i.op));
             break;
+        case OP_CALL:
         case OP_CONS:
         case OP_GET_LOCAL: case OP_SET_LOCAL:
         case OP_GET_FIELD: case OP_SET_FIELD:
@@ -319,6 +319,14 @@ static void push(Vm *vm, Value v) {
     int idx = vm->nstack++;
     vm->stack = arraygrow(vm->stack, vm->nstack);
     vm->stack[idx] = v;
+}
+
+static Value peek(Vm *vm, int off) {
+   if (vm->nstack - 1 - off < 0) {
+        printf("*** stack underflow\n");
+        exit(1);
+   }
+   return vm->stack[vm->nstack - 1 - off];
 }
 
 static Value pop(Vm *vm) {
@@ -405,7 +413,7 @@ static void pushfield(Vm *vm, Value vtab, Value vname) {
         push(vm, nilval());
 }
 
-static void runchunkoffset(Vm *vm, Chunk *c, int offset) {
+static void runchunkoffset(Vm *vm, Chunk *c, int base) {
     for (int ip = 0; ip < c->nins; ip++) {
         Ins i = c->ins[ip];
         switch (i.op) {
@@ -419,10 +427,10 @@ static void runchunkoffset(Vm *vm, Chunk *c, int offset) {
             break;
         }
         case OP_POP: pop(vm); break;
-        case OP_GET_LOCAL: push(vm, vm->stack[offset + i.arg]); break;
+        case OP_GET_LOCAL: push(vm, vm->stack[base + i.arg]); break;
         case OP_SET_LOCAL: {
             Value v = pop(vm);
-            vm->stack[offset + i.arg] = v;
+            vm->stack[base + i.arg] = v;
             push(vm, v);
             break;
         }
@@ -478,15 +486,21 @@ static void runchunkoffset(Vm *vm, Chunk *c, int offset) {
             printf("\n");
             break;
         case OP_CALL: {
-            Value vfn = pop(vm);
+            Value vfn = peek(vm, i.arg);
             ObjFunc *fn = (ObjFunc *)vfn.as.obj;
             if (vfn.type != V_OBJ || fn->hdr.type != OBJ_FUNC) {
                 printf("*** can't call non-function\n");
                 exit(1);
             }
-            int nstack = vm->nstack;
-            runchunkoffset(vm, fn->chunk, nstack);
-            vm->nstack = nstack + 1;
+            if (fn->arity != i.arg) {
+                printf("*** expected %i args, got %i\n", fn->arity, i.arg);
+                exit(1);
+            }
+            int firstarg = vm->nstack - fn->arity;
+            runchunkoffset(vm, fn->chunk, firstarg);
+            Value rval = pop(vm);
+            vm->nstack = firstarg - 1;
+            push(vm, rval);
             break;
         }
         default:

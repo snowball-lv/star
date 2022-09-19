@@ -9,6 +9,7 @@
 #define TOKS(T) T(NONE) T(EOF) T(NUM) T(NIL) T(STR) \
         T(ADD) T(SUB) T(MUL) T(DIV) \
         T(DOT) \
+        T(COMMA) \
         T(LPAREN) T(RPAREN) \
         T(LBRACE) T(RBRACE) \
         T(ASSIGN) \
@@ -82,6 +83,7 @@ static Tok nexttok(Parser *p) {
     case '=': p->src++; return (Tok){T_ASSIGN, start, 1};
     case '<': p->src++; return (Tok){T_LT, start, 1};
     case '.': p->src++; return (Tok){T_DOT, start, 1};
+    case ',': p->src++; return (Tok){T_COMMA, start, 1};
     case '"': p->src++; goto str;
     }
     if (isdigit(*start)) goto num;
@@ -212,9 +214,14 @@ static void primary(Parser *p) {
 
 static void callexpr(Parser *p) {
     primary(p);
-    if (match(p, T_LPAREN)) {
-        expect(p, T_RPAREN);
-        emitcall(curchunk(p));
+    while (match(p, T_LPAREN)) {
+        int nargs = 0;
+        while (!match(p, T_RPAREN)) {
+            expr(p);
+            match(p, T_COMMA); // optional
+            nargs++;
+        }
+        emitcall(curchunk(p), nargs);
     }
 }
 
@@ -369,14 +376,26 @@ static void stm(Parser *p) {
             exit(1);
         }
         definelocal(p, name);
-        expect(p, T_LPAREN);
-        expect(p, T_RPAREN);
-        expect(p, T_LBRACE);
         Function child = {0};
         child.obj = newfunc();
         child.locals = newarray(sizeof(Local));
         child.parent = p->func;
         p->func = &child;
+        expect(p, T_LPAREN);
+        int nparams = 0;
+        while (!match(p, T_RPAREN)) {
+            expect(p, T_ID);
+            Tok name = p->prev;
+            if (haslocal(p, name)) {
+                printf("*** parameter %s already declared\n", name.str);
+                exit(1);
+            }
+            definelocal(p, name);
+            nparams++;
+            match(p, T_COMMA); // optional
+        }
+        p->func->obj->arity = nparams;
+        expect(p, T_LBRACE);
         block(p);
         emitnil(curchunk(p));
         emitret(curchunk(p));

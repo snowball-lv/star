@@ -50,6 +50,7 @@ typedef struct {
 typedef struct {
     Obj hdr;
     Chunk *chunk;
+    int arity;
 } ObjFunc;
 
 typedef struct {
@@ -91,7 +92,7 @@ int emitnot(Chunk *c);
 int emitlt(Chunk *c);
 int emitnil(Chunk *c);
 int emitnew(Chunk *c);
-int emitcall(Chunk *c);
+int emitcall(Chunk *c, int nargs);
 
 void patchjmp(Chunk *c, int ip);
 int getip(Chunk *c);
