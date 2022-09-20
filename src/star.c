@@ -17,7 +17,8 @@
         OP(NOP) \
         OP(NOT) \
         OP(LT) \
-        OP(CALL)
+        OP(CALL) \
+        OP(DUP)
 
 #define OBJS(O) O(NONE) O(STR) O(TAB) O(FUNC)
 
@@ -208,6 +209,10 @@ int emitnew(Chunk *c) {
     return emit(c, (Ins){OP_NEW});
 }
 
+int emitdup(Chunk *c) {
+    return emit(c, (Ins){OP_DUP});
+}
+
 int emitcall(Chunk *c, int nargs) {
     return emit(c, (Ins){OP_CALL, nargs});
 }
@@ -264,7 +269,20 @@ static void printval(Value v) {
     case V_OBJ: {
         switch (v.as.obj->type) {
         case OBJ_STR: printf("\"%s\"", ((ObjString *)v.as.obj)->str); return;
-        case OBJ_TAB: printf("{Object Table}"); return;
+        case OBJ_TAB: {
+            printf("{");
+            ObjTab *tab = (ObjTab *)v.as.obj;
+            ObjString *key;
+            Value v;
+            int idx = 0;
+            while ((idx = valtabnext(tab->fields, idx, &key, &v))) {
+                printf("\"%s\": ", key->str);
+                printval(v);
+                printf(", ");
+            }
+            printf("}");
+            return;
+        }
         case OBJ_FUNC: printf("{Object Function}"); return;
         }
     }
@@ -299,6 +317,7 @@ void printchunk(Chunk *c) {
         case OP_LT:
         case OP_NIL:
         case OP_NEW:
+        case OP_DUP:
             printf("%s", opname(i.op));
             break;
         case OP_CALL:
@@ -423,6 +442,12 @@ static void runchunkoffset(Vm *vm, Chunk *c, int base) {
         case OP_NIL: push(vm, nilval()); break;
         case OP_NEW: {
             Value v = (Value){V_OBJ, {.obj = (Obj *)alloctab()}};
+            push(vm, v);
+            break;
+        }
+        case OP_DUP: {
+            Value v = pop(vm);
+            push(vm, v);
             push(vm, v);
             break;
         }

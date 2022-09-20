@@ -183,6 +183,17 @@ static void expr(Parser *p);
 
 static void object(Parser *p) {
     emitnew(curchunk(p));
+    while (!match(p, T_RBRACE)) {
+        expect(p, T_DOT);
+        expect(p, T_ID);
+        int fieldname = addcons(curchunk(p), strval(p->prev.str));
+        expect(p, T_ASSIGN);
+        emitdup(curchunk(p));
+        expr(p);
+        emitsetfield(curchunk(p), fieldname);
+        emitpop(curchunk(p)); // set_field pushes the value
+        match(p, T_COMMA); // optional
+    }
 }
 
 static void primary(Parser *p) {
@@ -204,7 +215,6 @@ static void primary(Parser *p) {
     }
     else if (match(p, T_LBRACE)) {
         object(p);
-        expect(p, T_RBRACE);
     }
     else {
         printf("*** unexpected token %s:%s\n", tname(p->next.type), p->next.str);

@@ -16,6 +16,17 @@ struct ValTab {
     int nused;
 };
 
+int valtabnext(ValTab *vt, int idx, ObjString **key, Value *dst) {
+    for (; idx < vt->nslots; idx++) {
+        Entry *e = &vt->slots[idx];
+        if (!e->key) continue;
+        *key = e->key;
+        *dst = e->value;
+        return idx + 1;
+    }
+    return 0;
+}
+
 ValTab *newvaltab() {
     ValTab *vt = xmalloc(sizeof(ValTab));
     memset(vt, 0, sizeof(ValTab));

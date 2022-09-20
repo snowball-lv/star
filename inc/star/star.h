@@ -85,6 +85,7 @@ int emitpop(Chunk *c);
 int emitgetlocal(Chunk *c, int slot);
 int emitsetlocal(Chunk *c, int slot);
 int emitgetfield(Chunk *c, int consid);
+int emitsetfield(Chunk *c, int consid);
 int emitcjmp(Chunk *c);
 int emitjmp(Chunk *c);
 int emitjmp2(Chunk *c, int ip);
@@ -92,6 +93,7 @@ int emitnot(Chunk *c);
 int emitlt(Chunk *c);
 int emitnil(Chunk *c);
 int emitnew(Chunk *c);
+int emitdup(Chunk *c);
 int emitcall(Chunk *c, int nargs);
 
 void patchjmp(Chunk *c, int ip);
@@ -102,6 +104,7 @@ ValTab *newvaltab();
 void freevaltab(ValTab *vt);
 int valtabget(ValTab *vt, ObjString *key, Value *dst);
 void valtabset(ValTab *vt, ObjString *key, Value v);
+int valtabnext(ValTab *vt, int idx, ObjString **key, Value *dst);
 
 void printchunk(Chunk *c);
 void printstack(Vm *vm);
