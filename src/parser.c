@@ -227,6 +227,16 @@ static void object(Parser *p) {
     }
 }
 
+static void definelocal(Parser *p, Tok name) {
+    Function *fn = p->func;
+    int idx = fn->nlocals++;
+    fn->locals = arraygrow(fn->locals, fn->nlocals);
+    fn->locals[idx].name = name;
+    fn->locals[idx].depth = p->func->depth;
+}
+
+static void stm(Parser *p);
+
 static void primary(Parser *p) {
     if (match(p, T_STR)) {
         emitcons(curchunk(p), addcons(curchunk(p), strval(p->prev.str)));
@@ -253,31 +263,56 @@ static void primary(Parser *p) {
     else if (match(p, T_LBRACE)) {
         object(p);
     }
+    else if (match(p, T_FUNC)) {
+        Function child = {0};
+        child.obj = newfunc();
+        child.locals = newarray(sizeof(Local));
+        child.parent = p->func;
+        p->func = &child;
+        expect(p, T_LPAREN);
+        int nparams = 0;
+        while (!match(p, T_RPAREN)) {
+            expect(p, T_ID);
+            Tok name = p->prev;
+            if (haslocal(p, name)) {
+                printf("*** parameter %s already declared\n", name.str);
+                exit(1);
+            }
+            definelocal(p, name);
+            nparams++;
+            match(p, T_COMMA); // optional
+        }
+        p->func->obj->arity = nparams;
+        stm(p);
+        emitnil(curchunk(p));
+        emitret(curchunk(p));
+        printchunk(curchunk(p));
+        p->func = p->func->parent;
+        emitcons(curchunk(p), addcons(curchunk(p), OBJVAL(child.obj)));
+    }
     else {
         printf("*** unexpected token %s:%s\n", tname(p->next.type), p->next.str);
         exit(1);
     }
 }
 
-static void callexpr(Parser *p) {
+static void calldotexpr(Parser *p) {
     primary(p);
-    while (match(p, T_LPAREN)) {
-        int nargs = 0;
-        while (!match(p, T_RPAREN)) {
-            expr(p);
-            match(p, T_COMMA); // optional
-            nargs++;
+    while (match(p, T_LPAREN) || match(p, T_DOT)) {
+        if (p->prev.type == T_LPAREN) {
+            int nargs = 0;
+            while (!match(p, T_RPAREN)) {
+                expr(p);
+                match(p, T_COMMA); // optional
+                nargs++;
+            }
+            emitcall(curchunk(p), nargs);
         }
-        emitcall(curchunk(p), nargs);
-    }
-}
-
-static void dotexpr(Parser *p) {
-    callexpr(p);
-    while (match(p, T_DOT)) {
-        expect(p, T_ID);
-        int name = addcons(curchunk(p), strval(p->prev.str));
-        emitgetfield(curchunk(p), name);
+        else {
+            expect(p, T_ID);
+            int name = addcons(curchunk(p), strval(p->prev.str));
+            emitgetfield(curchunk(p), name);
+        }
     }
 }
 
@@ -291,7 +326,7 @@ static void unary(Parser *p) {
         emitnot(curchunk(p));
     }
     else {
-        dotexpr(p);
+        calldotexpr(p);
     }
 }
 
@@ -398,14 +433,6 @@ static void block(Parser *p) {
     }
 }
 
-static void definelocal(Parser *p, Tok name) {
-    Function *fn = p->func;
-    int idx = fn->nlocals++;
-    fn->locals = arraygrow(fn->locals, fn->nlocals);
-    fn->locals[idx].name = name;
-    fn->locals[idx].depth = p->func->depth;
-}
-
 static void ifstm(Parser *p) {
     expect(p, T_LPAREN);
     expr(p);
@@ -462,41 +489,6 @@ static void stm(Parser *p) {
     else if (match(p, T_PRINT)) {
         expr(p);
         emitprint(curchunk(p));
-    }
-    else if (match(p, T_FUNC)) {
-        expect(p, T_ID);
-        Tok name = p->prev;
-        if (haslocal(p, name)) {
-            printf("*** variable %s already declared\n", name.str);
-            exit(1);
-        }
-        definelocal(p, name);
-        Function child = {0};
-        child.obj = newfunc();
-        child.locals = newarray(sizeof(Local));
-        child.parent = p->func;
-        p->func = &child;
-        expect(p, T_LPAREN);
-        int nparams = 0;
-        while (!match(p, T_RPAREN)) {
-            expect(p, T_ID);
-            Tok name = p->prev;
-            if (haslocal(p, name)) {
-                printf("*** parameter %s already declared\n", name.str);
-                exit(1);
-            }
-            definelocal(p, name);
-            nparams++;
-            match(p, T_COMMA); // optional
-        }
-        p->func->obj->arity = nparams;
-        expect(p, T_LBRACE);
-        block(p);
-        emitnil(curchunk(p));
-        emitret(curchunk(p));
-        printchunk(curchunk(p));
-        p->func = p->func->parent;
-        emitcons(curchunk(p), addcons(curchunk(p), OBJVAL(child.obj)));
     }
     else {
         expr(p);

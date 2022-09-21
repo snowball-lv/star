@@ -1,11 +1,13 @@
 
 
-
-function person(name, age) {
-    return {
-        .name = name,
-        .age = age
+var obj = {
+    .foo = function() {
+        print "Hello from foo()"
+        return "ret value"
     }
 }
 
-print person("john", 27)
+var add = function(a, b) return a + b
+
+print add("Hello", function(){return ", World"}())
+print obj.foo()
