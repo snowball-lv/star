@@ -91,9 +91,15 @@ int emitjmp(Chunk *c);
 int emitjmp2(Chunk *c, int ip);
 int emitnot(Chunk *c);
 int emitlt(Chunk *c);
+int emitgt(Chunk *c);
+int emiteq(Chunk *c);
 int emitnil(Chunk *c);
 int emitnew(Chunk *c);
 int emitdup(Chunk *c);
+int emittrue(Chunk *c);
+int emitfalse(Chunk *c);
+int emitand(Chunk *c);
+int emitor(Chunk *c);
 int emitcall(Chunk *c, int nargs);
 
 void patchjmp(Chunk *c, int ip);

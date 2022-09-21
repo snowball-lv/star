@@ -15,7 +15,8 @@
         T(ASSIGN) \
         T(ID) \
         T(VAR) T(PRINT) T(IF) T(ELSE) T(WHILE) T(FUNC) \
-        T(LT) \
+        T(LT) T(GT) T(EQ) T(NEQ) T(LTE) T(GTE) T(BANG) T(AND) T(OR) \
+        T(TRUE) T(FALSE) \
         T(RET)
 
 enum {
@@ -80,8 +81,38 @@ static Tok nexttok(Parser *p) {
     case ')': p->src++; return (Tok){T_RPAREN, start, 1};
     case '{': p->src++; return (Tok){T_LBRACE, start, 1};
     case '}': p->src++; return (Tok){T_RBRACE, start, 1};
-    case '=': p->src++; return (Tok){T_ASSIGN, start, 1};
-    case '<': p->src++; return (Tok){T_LT, start, 1};
+    case '&':
+        if (*(p->src + 1) != '&') break;
+        p->src += 2;
+        return (Tok){T_AND, start, 2};
+    case '|':
+        if (*(p->src + 1) != '|') break;
+        p->src += 2;
+        return (Tok){T_OR, start, 2};
+    case '!':
+        p->src++;
+        if (*p->src != '=')
+            return (Tok){T_BANG, start, 1};
+        p->src++;
+        return (Tok){T_NEQ, start, 2};
+    case '=':
+        p->src++;
+        if (*p->src != '=')
+            return (Tok){T_ASSIGN, start, 1};
+        p->src++;
+        return (Tok){T_EQ, start, 2};
+    case '<':
+        p->src++;
+        if (*p->src != '=')
+            return (Tok){T_LT, start, 1};
+        p->src++;
+        return (Tok){T_LTE, start, 2};
+    case '>':
+        p->src++;
+        if (*p->src != '=')
+            return (Tok){T_GT, start, 1};
+        p->src++;
+        return (Tok){T_GTE, start, 2};
     case '.': p->src++; return (Tok){T_DOT, start, 1};
     case ',': p->src++; return (Tok){T_COMMA, start, 1};
     case '"': p->src++; goto str;
@@ -200,6 +231,12 @@ static void primary(Parser *p) {
     if (match(p, T_STR)) {
         emitcons(curchunk(p), addcons(curchunk(p), strval(p->prev.str)));
     }
+    else if (match(p, T_TRUE)) {
+        emittrue(curchunk(p));
+    }
+    else if (match(p, T_FALSE)) {
+        emitfalse(curchunk(p));
+    }
     else if (match(p, T_NIL)) {
         emitnil(curchunk(p));
     }
@@ -249,6 +286,10 @@ static void unary(Parser *p) {
         unary(p);
         emitneg(curchunk(p));
     }
+    if (match(p, T_BANG)) {
+        unary(p);
+        emitnot(curchunk(p));
+    }
     else {
         dotexpr(p);
     }
@@ -280,14 +321,58 @@ static void mathexpr(Parser *p) {
 
 static void relexpr(Parser *p) {
     mathexpr(p);
-    while (match(p, T_LT)) {
+    while (match(p, T_LT) || match(p, T_GT)
+            || match(p, T_LTE) || match(p, T_GTE)) {
+        Tok op = p->prev;
         mathexpr(p);
-        emitlt(curchunk(p));
+        switch (op.type) {
+        case T_LT: emitlt(curchunk(p)); break;
+        case T_GT: emitgt(curchunk(p)); break;
+        case T_LTE:
+            emitgt(curchunk(p));
+            emitnot(curchunk(p));
+            break;
+        case T_GTE:
+            emitlt(curchunk(p));
+            emitnot(curchunk(p));
+            break;
+        }
+    }
+}
+
+static void eqexpr(Parser *p) {
+    relexpr(p);
+    while (match(p, T_EQ) || match(p, T_NEQ)) {
+        Tok op = p->prev;
+        relexpr(p);
+        switch (op.type) {
+        case T_EQ: emiteq(curchunk(p)); break;
+        case T_NEQ:
+            emiteq(curchunk(p));
+            emitnot(curchunk(p));
+            break;
+        }
+    }
+}
+
+static void andexpr(Parser *p) {
+    eqexpr(p);
+    while (match(p, T_AND)) {
+        eqexpr(p);
+        emitand(curchunk(p));
+    }
+}
+
+static void orexpr(Parser *p) {
+    andexpr(p);
+    while (match(p, T_OR)) {
+        andexpr(p);
+        emitor(curchunk(p));
     }
 }
 
 static void assignment(Parser *p) {
-    relexpr(p);
+    orexpr(p);
     if (match(p, T_ASSIGN)) {
         int getop = getip(curchunk(p)) - 1;
         assignment(p);
@@ -442,6 +527,8 @@ static void definekws(Parser *p) {
     tabset(p->kws, "nil", T_NIL);
     tabset(p->kws, "function", T_FUNC);
     tabset(p->kws, "return", T_RET);
+    tabset(p->kws, "true", T_TRUE);
+    tabset(p->kws, "false", T_FALSE);
 }
 
 ObjFunc *compile(char *src) {

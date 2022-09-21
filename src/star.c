@@ -16,7 +16,8 @@
         OP(CJMP) OP(JMP) \
         OP(NOP) \
         OP(NOT) \
-        OP(LT) \
+        OP(TRUE) OP(FALSE) \
+        OP(LT) OP(GT) OP(EQ) OP(AND) OP(OR) \
         OP(CALL) \
         OP(DUP)
 
@@ -189,6 +190,14 @@ int emitjmp(Chunk *c) {
     return emit(c, (Ins){OP_JMP});
 }
 
+int emittrue(Chunk *c) {
+    return emit(c, (Ins){OP_TRUE});
+}
+
+int emitfalse(Chunk *c) {
+    return emit(c, (Ins){OP_FALSE});
+}
+
 int emitjmp2(Chunk *c, int ip) {
     return emit(c, (Ins){OP_JMP, ip});
 }
@@ -197,8 +206,24 @@ int emitnot(Chunk *c) {
     return emit(c, (Ins){OP_NOT});
 }
 
+int emitand(Chunk *c) {
+    return emit(c, (Ins){OP_AND});
+}
+
+int emitor(Chunk *c) {
+    return emit(c, (Ins){OP_OR});
+}
+
 int emitlt(Chunk *c) {
     return emit(c, (Ins){OP_LT});
+}
+
+int emitgt(Chunk *c) {
+    return emit(c, (Ins){OP_GT});
+}
+
+int emiteq(Chunk *c) {
+    return emit(c, (Ins){OP_EQ});
 }
 
 int emitnil(Chunk *c) {
@@ -314,10 +339,12 @@ void printchunk(Chunk *c) {
         case OP_POP:
         case OP_NOP:
         case OP_NOT:
-        case OP_LT:
+        case OP_LT: case OP_GT: case OP_EQ:
         case OP_NIL:
         case OP_NEW:
         case OP_DUP:
+        case OP_TRUE: case OP_FALSE:
+        case OP_AND: case OP_OR:
             printf("%s", opname(i.op));
             break;
         case OP_CALL:
@@ -386,6 +413,14 @@ static void binop(Vm *vm, Value l, Value r, int op) {
         case OP_MUL: push(vm, numval(l.as.num * r.as.num)); return;
         case OP_DIV: push(vm, numval(l.as.num / r.as.num)); return;
         case OP_LT: push(vm, boolval(l.as.num < r.as.num)); return;
+        case OP_GT: push(vm, boolval(l.as.num > r.as.num)); return;
+        case OP_EQ: push(vm, boolval(l.as.num == r.as.num)); return;
+        }
+    }
+    else if (l.type == V_BOOL && r.type == V_BOOL) {
+        switch (op) {
+        case OP_AND: push(vm, boolval(l.as.boolean && r.as.boolean)); return;
+        case OP_OR: push(vm, boolval(l.as.boolean || r.as.boolean)); return;
         }
     }
     else if (isvstr(l) && isvstr(r) && op == OP_ADD) {
@@ -440,6 +475,8 @@ static void runchunkoffset(Vm *vm, Chunk *c, int base) {
         case OP_RET: return;
         case OP_CONS: push(vm, c->cons[i.arg]); break;
         case OP_NIL: push(vm, nilval()); break;
+        case OP_TRUE: push(vm, boolval(1)); break;
+        case OP_FALSE: push(vm, boolval(0)); break;
         case OP_NEW: {
             Value v = (Value){V_OBJ, {.obj = (Obj *)alloctab()}};
             push(vm, v);
@@ -500,7 +537,11 @@ static void runchunkoffset(Vm *vm, Chunk *c, int base) {
         case OP_SUB:
         case OP_MUL:
         case OP_DIV: 
-        case OP_LT: {
+        case OP_LT: 
+        case OP_GT:
+        case OP_EQ: 
+        case OP_AND: 
+        case OP_OR: {
             Value r = pop(vm);
             Value l = pop(vm);
             binop(vm, l, r, i.op);
