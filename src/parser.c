@@ -17,6 +17,7 @@
         T(VAR) T(PRINT) T(IF) T(ELSE) T(WHILE) T(FUNC) \
         T(LT) T(GT) T(EQ) T(NEQ) T(LTE) T(GTE) T(BANG) T(AND) T(OR) \
         T(TRUE) T(FALSE) \
+        T(COLON) \
         T(RET)
 
 enum {
@@ -114,6 +115,7 @@ static Tok nexttok(Parser *p) {
         p->src++;
         return (Tok){T_GTE, start, 2};
     case '.': p->src++; return (Tok){T_DOT, start, 1};
+    case ':': p->src++; return (Tok){T_COLON, start, 1};
     case ',': p->src++; return (Tok){T_COMMA, start, 1};
     case '"': p->src++; goto str;
     }
@@ -298,9 +300,14 @@ static void primary(Parser *p) {
 
 static void calldotexpr(Parser *p) {
     primary(p);
-    while (match(p, T_LPAREN) || match(p, T_DOT)) {
+    int colon = 0;
+    while (match(p, T_LPAREN) || match(p, T_DOT) || match(p, T_COLON)) {
         if (p->prev.type == T_LPAREN) {
             int nargs = 0;
+            if (colon) {
+                colon = 0;
+                nargs++;
+            }
             while (!match(p, T_RPAREN)) {
                 expr(p);
                 match(p, T_COMMA); // optional
@@ -309,10 +316,22 @@ static void calldotexpr(Parser *p) {
             emitcall(curchunk(p), nargs);
         }
         else {
+            if (colon) goto end;
+            if (p->prev.type == T_COLON) {
+                colon = 1;
+                emitdup(curchunk(p));
+            }
             expect(p, T_ID);
             int name = addcons(curchunk(p), strval(p->prev.str));
             emitgetfield(curchunk(p), name);
+            if (colon)
+                emitswap(curchunk(p));
         }
+    }
+end:
+    if (colon) {
+        printf("*** colon has to be followed by function call\n");
+        exit(1);
     }
 }
 

@@ -100,6 +100,7 @@ int emittrue(Chunk *c);
 int emitfalse(Chunk *c);
 int emitand(Chunk *c);
 int emitor(Chunk *c);
+int emitswap(Chunk *c);
 int emitcall(Chunk *c, int nargs);
 
 void patchjmp(Chunk *c, int ip);

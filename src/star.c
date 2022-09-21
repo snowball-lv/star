@@ -18,6 +18,7 @@
         OP(NOT) \
         OP(TRUE) OP(FALSE) \
         OP(LT) OP(GT) OP(EQ) OP(AND) OP(OR) \
+        OP(SWAP) \
         OP(CALL) \
         OP(DUP)
 
@@ -214,6 +215,10 @@ int emitor(Chunk *c) {
     return emit(c, (Ins){OP_OR});
 }
 
+int emitswap(Chunk *c) {
+    return emit(c, (Ins){OP_SWAP});
+}
+
 int emitlt(Chunk *c) {
     return emit(c, (Ins){OP_LT});
 }
@@ -343,6 +348,7 @@ void printchunk(Chunk *c) {
         case OP_NIL:
         case OP_NEW:
         case OP_DUP:
+        case OP_SWAP:
         case OP_TRUE: case OP_FALSE:
         case OP_AND: case OP_OR:
             printf("%s", opname(i.op));
@@ -486,6 +492,13 @@ static void runchunkoffset(Vm *vm, Chunk *c, int base) {
             Value v = pop(vm);
             push(vm, v);
             push(vm, v);
+            break;
+        }
+        case OP_SWAP: {
+            Value a = pop(vm);
+            Value b = pop(vm);
+            push(vm, a);
+            push(vm, b);
             break;
         }
         case OP_POP: pop(vm); break;
